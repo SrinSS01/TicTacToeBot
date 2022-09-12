@@ -8,7 +8,9 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.events.ReadyEvent;
 import net.dv8tion.jda.api.events.ShutdownEvent;
+import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
+import net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent;
 import net.dv8tion.jda.api.events.interaction.ButtonClickEvent;
 import net.dv8tion.jda.api.events.interaction.SlashCommandEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -62,15 +64,27 @@ public class Events extends ListenerAdapter {
 
         guild.getMembers().forEach( member -> {
             User user = member.getUser();
-            if (user.isBot()) return;
-            Document result = Database.LEVELS.find(
-                    Filters.and(
-                            Filters.eq("guildId", guild.getId()),
-                            Filters.eq("userId", user.getId())
-                    )
-            ).first();
-            if (result == null) {
-                Database.LEVELS.insertOne(new Document()
+            insertNewUser(guild, user);
+        });
+    }
+
+    @Override
+    public void onGuildMemberJoin(@NotNull GuildMemberJoinEvent event) {
+        Guild guild = event.getGuild();
+        User user = event.getUser();
+        insertNewUser(guild, user);
+    }
+
+    private static void insertNewUser(Guild guild, User user) {
+        if (user.isBot()) return;
+        Document result = Database.LEVELS.find(
+                Filters.and(
+                        Filters.eq("guildId", guild.getId()),
+                        Filters.eq("userId", user.getId())
+                )
+        ).first();
+        if (result == null) {
+            Database.LEVELS.insertOne(new Document()
                     .append("guildId", guild.getId())
                     .append("userId", user.getId())
                     .append("tag", user.getAsTag())
@@ -80,8 +94,16 @@ public class Events extends ListenerAdapter {
                     .append("wins", 0)
                     .append("loses", 0)
                     .append("draws", 0)
-                );
-            }
+            );
+        }
+    }
+
+    @Override
+    public void onGuildJoin(@NotNull GuildJoinEvent event) {
+        Guild guild = event.getGuild();
+        guild.getMembers().forEach( member -> {
+            User user = member.getUser();
+            insertNewUser(guild, user);
         });
     }
 
