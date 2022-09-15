@@ -1,10 +1,12 @@
 package com.tictactoebot;
 
 import com.mongodb.client.model.Filters;
+import com.tictactoebot.game.Game;
 import com.tictactoebot.game.Player;
 import com.tictactoebot.game.TicTacToe;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.events.ReadyEvent;
 import net.dv8tion.jda.api.events.ShutdownEvent;
@@ -23,18 +25,15 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
+import java.io.File;
+import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
-import java.util.Random;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-@SuppressWarnings("unchecked")
 public class Events extends ListenerAdapter {
     public static final Events INSTANCE = new Events();
     public static final Logger LOGGER = LoggerFactory.getLogger(Events.class);
-    public static final Random RANDOM = new Random();
 
     @Override
     public void onReady(@NotNull ReadyEvent event) {
@@ -49,6 +48,15 @@ public class Events extends ListenerAdapter {
     @Override
     public void onGuildReady(@NotNull GuildReadyEvent event) {
         Guild guild = event.getGuild();
+        upsertCommands(guild);
+
+        guild.getMembers().forEach( member -> {
+            User user = member.getUser();
+            insertNewUser(guild, user);
+        });
+    }
+
+    private static void upsertCommands(Guild guild) {
         guild
             .upsertCommand("play", "Play a game of TicTacToe with a mentioned user")
             .addOption(OptionType.USER, "user", "The user to play with", true)
@@ -61,11 +69,6 @@ public class Events extends ListenerAdapter {
             .queue();
 
         LOGGER.info("Registered commands for %s".formatted(guild.getName()));
-
-        guild.getMembers().forEach( member -> {
-            User user = member.getUser();
-            insertNewUser(guild, user);
-        });
     }
 
     @Override
@@ -101,6 +104,8 @@ public class Events extends ListenerAdapter {
     @Override
     public void onGuildJoin(@NotNull GuildJoinEvent event) {
         Guild guild = event.getGuild();
+        upsertCommands(guild);
+        LOGGER.info("Joined guild: " + guild.getName());
         guild.getMembers().forEach( member -> {
             User user = member.getUser();
             insertNewUser(guild, user);
@@ -109,12 +114,24 @@ public class Events extends ListenerAdapter {
 
     @Override
     public void onSlashCommand(@NotNull SlashCommandEvent event) {
-        Guild guild = event.getGuild();
-        if (guild == null) {
+        List<Permission> permissions = List.of(
+                Permission.USE_SLASH_COMMANDS,
+                Permission.MESSAGE_EMBED_LINKS,
+                Permission.MESSAGE_ATTACH_FILES,
+                Permission.MESSAGE_WRITE
+        );
+        if (!Objects.requireNonNull(event.getGuild()).getSelfMember().hasPermission(
+                permissions
+        )) {
+            StringBuilder builder = new StringBuilder();
+            builder.append("```").append('\n');
+            permissions.forEach(permission -> builder.append(permission.getName()).append('\n'));
+            builder.append("```");
+            event.reply("_I do not have one of the following permissions:_\n" + builder).setEphemeral(true).queue();
             return;
         }
-        if (!guild.getSelfMember().hasPermission(Permission.MESSAGE_READ, Permission.MESSAGE_WRITE, Permission.USE_SLASH_COMMANDS)) {
-            event.reply("I do not have permission to send message here").setEphemeral(true).queue();
+        Guild guild = event.getGuild();
+        if (guild == null) {
             return;
         }
         String commandName = event.getName();
@@ -130,26 +147,21 @@ public class Events extends ListenerAdapter {
                     event.reply("You can't play with a bot!").setEphemeral(true).queue();
                     return;
                 }
-                if (Database.CURRENTLY_PLAYING.containsKey(user)) {
-                    event.reply("You are already playing a game!").setEphemeral(true).queue();
-                    return;
-                }
-                if (Database.CURRENTLY_PLAYING.containsKey(mentionedUser)) {
-                    event.reply("This user is already playing a game!").setEphemeral(true).queue();
-                    return;
-                }
                 // confirm if the mentioned user is ready to play
-                event.reply("%s, will you accept a challenge of a game of TicTacToe from %s?".formatted(
-                        mentionedUser.getAsMention(),
-                        user.getAsMention()
-                )).addActionRow(
-                        Button.success("ready", "Yes"),
-                        Button.danger("not-ready", "No")
-                ).queue(interactionHook ->
-                        interactionHook.editOriginalFormat("%s didn't accept the challenge!", mentionedUser.getAsMention()).setActionRow(
-                        Button.success("ready", "Yes").asDisabled(),
-                        Button.danger("not-ready", "No").asDisabled()
-                ).queueAfter(5, TimeUnit.MINUTES));
+                event.deferReply().queue(
+                    interactionHook ->
+                        interactionHook.sendMessage("%s, will you accept a challenge of a game of TicTacToe from %s?".formatted(
+                            mentionedUser.getAsMention(),
+                            user.getAsMention()
+                        )).addActionRow(
+                                Button.success("ready", "Yes"),
+                                Button.danger("not-ready", "No")
+                        ).queue(message -> {
+                            long messageID = message.getIdLong();
+                            MatchData matchData = MatchData.create(user, mentionedUser);
+                            matchData.setPendingEdit(message);
+                            Database.MATCH_DATA_MAP.put(messageID, matchData);
+                        }));
             }
             case "stats" -> {
                 OptionMapping option = event.getOption("user");
@@ -227,78 +239,65 @@ public class Events extends ListenerAdapter {
     public void onButtonClick(@NotNull ButtonClickEvent event) {
         String buttonId = event.getComponentId();
         final User user = event.getUser();
-        final String messageId = event.getMessageId();
-        final List<User> mentionedUsers = event.getMessage().getMentionedUsers();
-        final User challenger = mentionedUsers.get(1);
-        final User challengeAccepter = mentionedUsers.get(0);
-        final boolean isNonPlayer = user.equals(challenger) || !user.equals(challengeAccepter);
+        final long messageID = event.getMessage().getIdLong();
+
+        final boolean isPlayer = Database.MATCH_DATA_MAP.containsKey(messageID);
+
+        if (!isPlayer) {
+            event.getInteraction().deferEdit().queue();
+            return;
+        }
+        final MatchData matchData = Database.MATCH_DATA_MAP.get(messageID);
+        final User challenger = matchData.getChallenger();
+        final User challengeAccepter = matchData.getChallengeAccepter();
         switch (buttonId) {
-            case "ready" -> {
-                if (isNonPlayer) {
-                    event.getInteraction().deferEdit().queue();
-                    return;
-                }
-                // generate a random number between 0 and 10 using Random class
-                // if the number is divisible by 2, then the user will play as Player.Type.CROSS else Player.Type.NAUGHT
-                boolean random = isPlayAsNaught();
-                setPlayers(/*player 1*/ challenger, /*player 2*/ challengeAccepter, random);
-                TicTacToe game = new TicTacToe();
-                Database.GAMES.put(challenger, game);
-                Database.GAMES.put(challengeAccepter, game);
-                List<ActionRow> board = new ArrayList<>(List.of(
-                        ActionRow.of(Button.primary("8", " "), Button.primary("7", " "), Button.primary("6", " ")),
-                        ActionRow.of(Button.primary("5", " "), Button.primary("4", " "), Button.primary("3", " ")),
-                        ActionRow.of(Button.primary("2", " "), Button.primary("1", " "), Button.primary("0", " ")),
-                        ActionRow.of(
-                                Button.primary("null1", " ").asDisabled(),
-                                Button.danger("resign", "stop"),
-                                Button.primary("null2", " ").asDisabled()
-                        )
-                ));
-                Database.BOARDS.put(messageId, board);
-                event.editMessageFormat("%s is playing ` %s `, %s is playing ` %s `",
-                        challenger.getAsMention(), Database.CURRENTLY_PLAYING.get(challenger).get(),
-                        user.getAsMention(), Database.CURRENTLY_PLAYING.get(challengeAccepter).get()
-                ).setActionRows(
-                        board
-                ).queue();
-            }
-            case "not-ready" -> {
-                if (isNonPlayer) {
-                    event.getInteraction().deferEdit().queue();
-                    return;
-                }
-                event.editMessageFormat("%s declined the challenge!", user.getAsMention()).setActionRow(
-                        Button.success("ready", "Yes").asDisabled(),
-                        Button.danger("not-ready", "No").asDisabled()
-                ).queue();
-            }
-            case "8", "7", "6", "5", "4", "3", "2", "1", "0" -> {
-                if (!Database.GAMES.containsKey(user) || !mentionedUsers.contains(user)) {
+            case "ready" -> { try {
+                if (!user.equals(challengeAccepter)) {
                     event.deferEdit().queue();
                     return;
                 }
-                TicTacToe game = Database.GAMES.get(user);
-                int pos = Integer.parseInt(buttonId);
-                boolean result = game.place(pos, Database.CURRENTLY_PLAYING.get(user).get());
-                ArrayList<ActionRow> board = (ArrayList<ActionRow>) Database.BOARDS.get(messageId);
-                int row = 2 - pos / 3;
-                ActionRow buttons = board.get(row);
-                buttons.updateComponent(buttonId, Button.primary(buttonId, Database.CURRENTLY_PLAYING.get(user).get().toString()));
-                board.set(row, buttons);
-                if (result) {
-                    final String guildId = Objects.requireNonNull(event.getGuild()).getId();
-                    if (game.isWin()) {
-                        disableBoard(board);
-                        event.editComponents(board).queue(hook -> {
-                            Player.Type type = game.getCurrentPlayer().get();
-                            Player.Type challengerType = Database.CURRENTLY_PLAYING.get(challenger).get();
-                            User loser = type == challengerType ? challenger : challengeAccepter;
-                            User winner = type == challengerType ? challengeAccepter : challenger;
-                            hook.sendMessageFormat("%s won! <a:celebrate:1018229309405671554>", winner.getAsMention()).queue();
 
-                            resetXPIfGT5(winner.getId(), guildId);
-                            resetXPIfGT5(loser.getId(), guildId);
+                Game game = matchData.acknowledge();
+                File boardImage = game.getBoardImage();
+
+                event.deferEdit()
+                        .setEmbeds(game.getEmbed())
+                        .addFile(boardImage)
+                        .setActionRows(game.getRows()).queue(hook -> hook.editOriginal("_ _").queue());
+            } catch (Exception e) { LOGGER.error(e.getMessage(), e); } }
+            case "not-ready" -> {
+                if (!user.equals(challengeAccepter)) {
+                    event.deferEdit().queue();
+                    return;
+                }
+                event.editMessageFormat("%s declined the challenge!", user.getAsMention()).setActionRows(List.of()).queue();
+                Database.MATCH_DATA_MAP.remove(messageID);
+            }
+            case "8", "7", "6", "5", "4", "3", "2", "1", "0" -> { try {
+                    long userID = user.getIdLong();
+                    Game game = matchData.getGame();
+
+                    if (!game.contains(userID)) {
+                        event.deferEdit().queue();
+                        return;
+                    }
+                    Player.Type playerType = game.getPlayerType(user);
+                    TicTacToe.Move result = game.select(buttonId, playerType);
+                    final String guildId = Objects.requireNonNull(event.getGuild()).getId();
+                    List<ActionRow> board = game.getRows();
+                    File boardImage = game.getBoardImage();
+                    MessageEmbed embed = game.getEmbed();
+                    switch (result) {
+                        case WIN -> event.deferEdit().queue(hook -> {
+                            User winner = game.getCurrentUser();
+                            User loser = winner.getIdLong() == challenger.getIdLong() ? challengeAccepter : challenger;
+                            hook.editOriginalComponents(board)
+                                    .setEmbeds(embed)
+                                    .retainFilesById(List.of())
+                                    .addFile(boardImage).queue();
+
+                            resetXPIfCrossesLimit(winner.getId(), guildId);
+                            resetXPIfCrossesLimit(loser.getId(), guildId);
 
                             Database.LEVELS.updateOne(
                                     Filters.and(
@@ -315,52 +314,59 @@ public class Events extends ListenerAdapter {
                                     Filters.eq("$inc", Filters.and(Filters.eq("loses", 1), Filters.eq("game-xp", 1)))
                             );
 
-                            mentionedUsers.forEach(it -> {
-                                Database.CURRENTLY_PLAYING.remove(it);
-                                Database.GAMES.remove(it);
-                                Database.BOARDS.remove(messageId);
-                            });
+                            Database.MATCH_DATA_MAP.remove(messageID);
                         });
-                    } else if (game.isDraw()) {
-                        disableBoard(board);
-                        event.editComponents(board).queue(hook -> {
-                            hook.sendMessage("It was a draw <a:sweat:1018229316670197801>").queue();
-                            mentionedUsers.forEach(it -> {
-                                resetXPIfGT5(it.getId(), guildId);
-                                Database.LEVELS.updateOne(
-                                        Filters.and(
-                                                Filters.eq("userId", it.getId()),
-                                                Filters.eq("guildId", guildId)
-                                        ),
-                                        Filters.eq("$inc", Filters.and(Filters.eq("draws", 1), Filters.eq("game-xp", 5)))
-                                );
-                                Database.CURRENTLY_PLAYING.remove(it);
-                                Database.GAMES.remove(it);
-                                Database.BOARDS.remove(messageId);
-                            });
-                        });
-                    } else event.editComponents(board).queue();
-                } else event.deferEdit().queue();
-            }
-            case "resign" -> {
-                mentionedUsers.forEach(it -> {
-                    Database.CURRENTLY_PLAYING.remove(it);
-                    Database.GAMES.remove(it);
-                });
+                        case DRAW -> event.deferEdit().queue(hook -> {
+                            hook.editOriginalComponents(board)
+                                    .setEmbeds(embed)
+                                    .retainFilesById(List.of())
+                                    .addFile(boardImage)
+                                    .queue();
+                            resetXPIfCrossesLimit(challenger.getId(), guildId);
+                            Database.LEVELS.updateOne(
+                                    Filters.and(
+                                            Filters.eq("userId", challenger.getId()),
+                                            Filters.eq("guildId", guildId)
+                                    ),
+                                    Filters.eq("$inc", Filters.and(Filters.eq("draws", 1), Filters.eq("game-xp", 5)))
+                            );
 
-                if (!mentionedUsers.contains(user)) {
+                            resetXPIfCrossesLimit(challengeAccepter.getId(), guildId);
+                            Database.LEVELS.updateOne(
+                                    Filters.and(
+                                            Filters.eq("userId", challengeAccepter.getId()),
+                                            Filters.eq("guildId", guildId)
+                                    ),
+                                    Filters.eq("$inc", Filters.and(Filters.eq("draws", 1), Filters.eq("game-xp", 5)))
+                            );
+                            Database.MATCH_DATA_MAP.remove(messageID);
+                        });
+                        case NONE ->
+                                event.deferEdit()
+                                    .queue(hook ->
+                                            hook.editOriginalComponents(board)
+                                                .setEmbeds(embed)
+                                                .retainFilesById(List.of())
+                                                .addFile(boardImage).queue());
+                        case INVALID -> event.deferEdit().queue();
+                    }
+                } catch (IOException ignore) {} }
+            case "resign" -> {
+                Game game = matchData.getGame();
+                if (!game.contains(user.getIdLong())) {
                     event.deferEdit().queue();
                     return;
                 }
-                List<ActionRow> board = ((ArrayList<ActionRow>) Database.BOARDS.get(messageId));
-                disableBoard(board);
-                event.editMessage("game ended").setActionRows(board).queue();
-                Database.BOARDS.remove(messageId);
+                game.resign(user);
+                MessageEmbed embed = game.getEmbed();
+                game.disableButtons();
+                event.editMessage("game ended").setEmbeds(embed).setActionRows(game.getRows()).queue();
+                Database.MATCH_DATA_MAP.remove(messageID);
             }
         }
     }
 
-    private void resetXPIfGT5(String id, String guildId) {
+    private void resetXPIfCrossesLimit(String id, String guildId) {
         Document info = getUserInfo(id, guildId);
         double xp = info.getInteger("game-xp");
         double limit = info.getInteger("game-xp-limit");
@@ -387,28 +393,5 @@ public class Events extends ListenerAdapter {
                 Filters.eq("userId", id),
                 Filters.eq("guildId", guildId)
         )).first());
-    }
-
-    private static void disableBoard(List<ActionRow> board) {
-        board.replaceAll(row -> {
-            row.forEach(button -> row.updateComponent(Objects.requireNonNull(button.getId()), ((Button) button).asDisabled()));
-            return row;
-        });
-    }
-
-    private void setPlayers(User user, User mentionedUser, boolean playAsX) {
-        Player X = new Player(Player.Type.CROSS);
-        Player O = new Player(Player.Type.NAUGHT);
-        if (playAsX) {
-            Database.CURRENTLY_PLAYING.put(user, X);
-            Database.CURRENTLY_PLAYING.put(mentionedUser, O);
-        } else {
-            Database.CURRENTLY_PLAYING.put(user, O);
-            Database.CURRENTLY_PLAYING.put(mentionedUser, X);
-        }
-    }
-
-    private boolean isPlayAsNaught() {
-        return RANDOM.nextInt(11) % 2 == 0;
     }
 }

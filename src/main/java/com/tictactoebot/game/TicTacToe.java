@@ -43,7 +43,7 @@ public class TicTacToe {
         return currentPlayer;
     }
 
-    public boolean place(int pos, Player.Type player) {
+    /*public boolean place(int pos, Player.Type player) {
         if (player != currentPlayer.get()) return false;
         int cell = 1 << pos;
         if (cell > LAST_INDEX || cell < 0 || ((x_board | o_board) & cell) == cell) return false;
@@ -57,24 +57,65 @@ public class TicTacToe {
     public boolean isWin() {
         return switch (currentPlayer.get()) {
             case NAUGHT -> {
-                currentPlayer.set(CROSS);
                 for (int winCombination : winCombinations) {
                     if ((o_board & winCombination) == winCombination) yield true;
                 }
+                currentPlayer.set(CROSS);
                 yield false;
             }
             case CROSS -> {
-                currentPlayer.set(NAUGHT);
                 for (int winCombination : winCombinations) {
                     if ((x_board & winCombination) == winCombination) yield true;
                 }
+                currentPlayer.set(NAUGHT);
+                yield false;
+            }
+            default -> false;
+        };
+    }*/
+    public Move place(int pos, Player.Type player) {
+        if (player != currentPlayer.get()) return Move.INVALID;
+        int cell = 1 << pos;
+        if (cell > LAST_INDEX || cell < 0 || ((x_board | o_board) & cell) == cell) return Move.INVALID;
+        switch (currentPlayer.get()) {
+            case CROSS -> {
+                x_board |= cell;
+                if (isWin(CROSS)) return Move.WIN;
+            }
+            case NAUGHT -> {
+                o_board |= cell;
+                if (isWin(NAUGHT)) return Move.WIN;
+            }
+        }
+        if (isDraw()) return Move.DRAW;
+        return Move.NONE;
+    }
+
+    private boolean isWin(Player.Type type) {
+        return switch (type) {
+            case NAUGHT -> {
+                for (int winCombination : winCombinations) {
+                    if ((o_board & winCombination) == winCombination) yield true;
+                }
+                currentPlayer.set(CROSS);
+                yield false;
+            }
+            case CROSS -> {
+                for (int winCombination : winCombinations) {
+                    if ((x_board & winCombination) == winCombination) yield true;
+                }
+                currentPlayer.set(NAUGHT);
                 yield false;
             }
             default -> false;
         };
     }
 
-    public boolean isDraw() {
+    private boolean isDraw() {
         return (x_board | o_board) == DRAW;
+    }
+
+    public enum Move {
+        WIN, DRAW, NONE, INVALID
     }
 }

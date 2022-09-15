@@ -3,6 +3,7 @@ package com.tictactoebot.game;
 public class Player {
     private Type type;
 
+
     public Player(Type type) {
         this.type = type;
     }
