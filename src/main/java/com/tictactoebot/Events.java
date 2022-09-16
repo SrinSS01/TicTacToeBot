@@ -189,12 +189,12 @@ public class Events extends ListenerAdapter {
                     String statsWindow =
                             "```js\n" +
                             "//  %s's stats  //\n\n".formatted(optionUser.current.getAsTag()) +
-                            "wins: " +  document.getInteger("wins") +   '\n' +
-                            "loses: " + document.getInteger("loses") +  '\n' +
-                            "draws: " + document.getInteger("draws") +  '\n' +
                             "game level: " + level + '\n' +
                             "game xp: %d/%d\n\nprogress bar\n".formatted(xp, (int) xpLimit) +
-                            progressBar + '\n' +
+                            progressBar + "\n\n" +
+                            "wins: " +  document.getInteger("wins") +   ", " +
+                            "loses: " + document.getInteger("loses") +  ", " +
+                            "draws: " + document.getInteger("draws") +  '\n' +
                             "```";
                     hook.sendMessage(statsWindow).queue();
                 });
@@ -218,13 +218,22 @@ public class Events extends ListenerAdapter {
                     )).iterator()) {
                         final StringBuilder leaderboard = new StringBuilder();
                         AtomicInteger rank = new AtomicInteger(1);
-                        leaderboard.append("```\nleaderboard\n\n");
+                        leaderboard.append("```kt\nleaderboard\n\n");
+                        String cell = "%6s";
+                        leaderboard.append(cell.formatted("rank"))
+                                .append(cell.formatted("level"))
+                                .append("%13s".formatted("xp"))
+                                .append(" name").append('\n');
                         result.forEachRemaining(document -> {
                             String tag = document.getString("tag");
                             int level = document.getInteger("game-level");
                             int xp = document.getInteger("game-xp");
                             int xpLimit = document.getInteger("game-xp-limit");
-                            leaderboard.append("%3s".formatted(rank.getAndIncrement())).append(" %3s".formatted(level)).append(" (%d/%d)".formatted(xp, xpLimit)).append(" %s".formatted(tag)).append('\n');
+                            String xpStr = "(%d/%d)".formatted(xp, xpLimit);
+                            leaderboard.append(cell.formatted(rank.getAndIncrement()))
+                                    .append(cell.formatted(level))
+                                    .append("%13s".formatted(xpStr))
+                                    .append(" %s".formatted(tag)).append('\n');
                         });
                         leaderboard.append("\n```");
                         hook.sendMessage(leaderboard.toString()).queue();
@@ -291,7 +300,7 @@ public class Events extends ListenerAdapter {
                         case WIN -> event.deferEdit().queue(hook -> {
                             User winner = game.getCurrentUser();
                             User loser = winner.getIdLong() == challenger.getIdLong() ? challengeAccepter : challenger;
-                            hook.editOriginalComponents(board)
+                            hook.editOriginalComponents(List.of())
                                     .setEmbeds(embed)
                                     .retainFilesById(List.of())
                                     .addFile(boardImage).queue();

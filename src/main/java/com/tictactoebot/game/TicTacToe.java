@@ -32,7 +32,7 @@ public class TicTacToe {
         this.x_board = 0;
         this.o_board = 0;
         this.currentPlayer = new Player(CROSS);
-        this.winCombinations = new int[]{
+        this.winCombinations = new int[] {
                 ROW_0, ROW_1, ROW_2,                    // rows
                 COLUMN_2, COLUMN_1, COLUMN_0,           // columns
                 DIAGONAL_RIGHT, DIAGONAL_LEFT           // diagonals
@@ -43,36 +43,6 @@ public class TicTacToe {
         return currentPlayer;
     }
 
-    /*public boolean place(int pos, Player.Type player) {
-        if (player != currentPlayer.get()) return false;
-        int cell = 1 << pos;
-        if (cell > LAST_INDEX || cell < 0 || ((x_board | o_board) & cell) == cell) return false;
-        switch (currentPlayer.get()) {
-            case CROSS -> x_board |= cell;
-            case NAUGHT -> o_board |= cell;
-        }
-        return true;
-    }
-
-    public boolean isWin() {
-        return switch (currentPlayer.get()) {
-            case NAUGHT -> {
-                for (int winCombination : winCombinations) {
-                    if ((o_board & winCombination) == winCombination) yield true;
-                }
-                currentPlayer.set(CROSS);
-                yield false;
-            }
-            case CROSS -> {
-                for (int winCombination : winCombinations) {
-                    if ((x_board & winCombination) == winCombination) yield true;
-                }
-                currentPlayer.set(NAUGHT);
-                yield false;
-            }
-            default -> false;
-        };
-    }*/
     public Move place(int pos, Player.Type player) {
         if (player != currentPlayer.get()) return Move.INVALID;
         int cell = 1 << pos;
