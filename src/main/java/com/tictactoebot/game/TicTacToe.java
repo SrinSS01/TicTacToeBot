@@ -1,5 +1,9 @@
 package com.tictactoebot.game;
 
+import net.dv8tion.jda.internal.utils.tuple.Pair;
+
+import java.util.Map;
+
 import static com.tictactoebot.game.Player.Type.CROSS;
 import static com.tictactoebot.game.Player.Type.NAUGHT;
 
@@ -18,7 +22,7 @@ public class TicTacToe {
     private int x_board;
     private int o_board;
     private final Player currentPlayer;
-    private final int[] winCombinations;
+    private final Map<Integer, WinCells> winCombinations;
     /*
         +-----------+
         | 8 | 7 | 6 |
@@ -32,52 +36,61 @@ public class TicTacToe {
         this.x_board = 0;
         this.o_board = 0;
         this.currentPlayer = new Player(CROSS);
-        this.winCombinations = new int[] {
-                ROW_0, ROW_1, ROW_2,                    // rows
-                COLUMN_2, COLUMN_1, COLUMN_0,           // columns
-                DIAGONAL_RIGHT, DIAGONAL_LEFT           // diagonals
-        };
+        this.winCombinations = Map.of(
+                ROW_0, WinCells.ROW_0,
+                ROW_1, WinCells.ROW_1,
+                ROW_2, WinCells.ROW_2,
+                COLUMN_2, WinCells.COLUMN_2,
+                COLUMN_1, WinCells.COLUMN_1,
+                COLUMN_0, WinCells.COLUMN_0,
+                DIAGONAL_RIGHT, WinCells.DIAGONAL_RIGHT,
+                DIAGONAL_LEFT, WinCells.DIAGONAL_LEFT
+        );
     }
 
     public Player getCurrentPlayer() {
         return currentPlayer;
     }
 
-    public Move place(int pos, Player.Type player) {
-        if (player != currentPlayer.get()) return Move.INVALID;
+    public Pair<Move, WinCells> place(int pos, Player.Type player) {
+        if (player != currentPlayer.get()) return Pair.of(Move.INVALID, null);
         int cell = 1 << pos;
-        if (cell > LAST_INDEX || cell < 0 || ((x_board | o_board) & cell) == cell) return Move.INVALID;
+        if (cell > LAST_INDEX || cell < 0 || ((x_board | o_board) & cell) == cell) return Pair.of(Move.INVALID, null);
         switch (currentPlayer.get()) {
             case CROSS -> {
                 x_board |= cell;
-                if (isWin(CROSS)) return Move.WIN;
+                Pair<Boolean, WinCells> win = isWin(CROSS);
+                if (win.getLeft()) return Pair.of(Move.WIN, win.getRight());
             }
             case NAUGHT -> {
                 o_board |= cell;
-                if (isWin(NAUGHT)) return Move.WIN;
+                Pair<Boolean, WinCells> win = isWin(NAUGHT);
+                if (win.getLeft()) return Pair.of(Move.WIN, win.getRight());
             }
         }
-        if (isDraw()) return Move.DRAW;
-        return Move.NONE;
+        if (isDraw()) return Pair.of(Move.DRAW, null);
+        return Pair.of(Move.NONE, null);
     }
 
-    private boolean isWin(Player.Type type) {
+    private Pair<Boolean, WinCells> isWin(Player.Type type) {
         return switch (type) {
             case NAUGHT -> {
-                for (int winCombination : winCombinations) {
-                    if ((o_board & winCombination) == winCombination) yield true;
+                for (var set : winCombinations.entrySet()) {
+                    int winCombination = set.getKey();
+                    if ((o_board & winCombination) == winCombination) yield Pair.of(true, set.getValue());
                 }
                 currentPlayer.set(CROSS);
-                yield false;
+                yield Pair.of(false, null);
             }
             case CROSS -> {
-                for (int winCombination : winCombinations) {
-                    if ((x_board & winCombination) == winCombination) yield true;
+                for (var set : winCombinations.entrySet()) {
+                    int winCombination = set.getKey();
+                    if ((x_board & winCombination) == winCombination) yield Pair.of(true, set.getValue());
                 }
                 currentPlayer.set(NAUGHT);
-                yield false;
+                yield Pair.of(false, null);
             }
-            default -> false;
+            default -> Pair.of(false, null);
         };
     }
 
@@ -87,5 +100,35 @@ public class TicTacToe {
 
     public enum Move {
         WIN, DRAW, NONE, INVALID
+    }
+
+    /*
+        +-----------+
+        | 8 | 7 | 6 |
+        |-----------|
+        | 5 | 4 | 3 |
+        |-----------|
+        | 2 | 1 | 0 |
+        +-----------+
+    */
+    public enum WinCells {
+        ROW_0(0, 1, 2),
+        ROW_1(3, 4, 5),
+        ROW_2(6, 7, 8),
+        COLUMN_2(6, 3, 0),
+        COLUMN_1(7, 4, 1),
+        COLUMN_0(8, 5, 2),
+        DIAGONAL_RIGHT(6, 4, 2),
+        DIAGONAL_LEFT(8, 4, 0);
+
+        private final int[] cells;
+
+        WinCells(int... cells) {
+            this.cells = cells;
+        }
+
+        public int[] getCells() {
+            return cells;
+        }
     }
 }

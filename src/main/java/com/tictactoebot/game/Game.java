@@ -79,17 +79,27 @@ public class Game {
     }
     public TicTacToe.Move select(String cell, Player.Type type) {
         int pos = Integer.parseInt(cell);
-        TicTacToe.Move move = ticTacToe.place(pos, type);
+        Pair<TicTacToe.Move, TicTacToe.WinCells> moveWinCellsPair = ticTacToe.place(pos, type);
+        TicTacToe.Move move = moveWinCellsPair.getLeft();
         if (move == TicTacToe.Move.INVALID) return TicTacToe.Move.INVALID;
-        draw(pos, type);
         int row = 2 - pos / 3;
         ActionRow buttons = rows.get(row);
         Button newButton = Button.primary(cell, type.toString());
         buttons.updateComponent(cell, newButton.asDisabled());
         rows.set(row, buttons);
+        TicTacToe.WinCells cells = moveWinCellsPair.getRight();
+        draw(pos, type);
         switch (move) {
             case WIN -> {
                 embedBuilder.setDescription(description.setWinner(getCurrentUser()).toString());
+                for (int winCell : cells.getCells()) {
+                    Pair<Integer, Integer> coordXY = coordinates.get(8 - winCell);
+                    int x = coordXY.getLeft() - 70;
+                    int y = coordXY.getRight() - 70;
+                    graphics.setColor(Color.GREEN);
+                    graphics.setStroke(new BasicStroke(10));
+                    graphics.drawRect(x, y, 140, 140);
+                }
                 disableButtons();
             }
             case DRAW -> {
@@ -106,7 +116,9 @@ public class Game {
 
     private void draw(int pos, Player.Type type) {
         Pair<Integer, Integer> xy = coordinates.get(8 - pos);
-        graphics.drawImage(type == Player.Type.CROSS? cross: naught, xy.getLeft() - 50, xy.getRight() - 50, 100, 100, null);
+        int x = xy.getLeft() - 50;
+        int y = xy.getRight() - 50;
+        graphics.drawImage(type == Player.Type.CROSS? cross: naught, x, y, 100, 100, null);
     }
 
     public boolean contains(long playerID) {

@@ -269,10 +269,10 @@ public class Events extends ListenerAdapter {
                 Game game = matchData.acknowledge();
                 File boardImage = game.getBoardImage();
 
-                event.deferEdit()
+                event.editMessage("game started")
                         .setEmbeds(game.getEmbed())
                         .addFile(boardImage)
-                        .setActionRows(game.getRows()).queue(hook -> hook.editOriginal("_ _").queue());
+                        .setActionRows(game.getRows()).queue();
             } catch (Exception e) { LOGGER.error(e.getMessage(), e); } }
             case "not-ready" -> {
                 if (!user.equals(challengeAccepter)) {
@@ -297,7 +297,7 @@ public class Events extends ListenerAdapter {
                     File boardImage = game.getBoardImage();
                     MessageEmbed embed = game.getEmbed();
                     switch (result) {
-                        case WIN -> event.deferEdit().queue(hook -> {
+                        case WIN -> event.editMessage("game ended").queue(hook -> {
                             User winner = game.getCurrentUser();
                             User loser = winner.getIdLong() == challenger.getIdLong() ? challengeAccepter : challenger;
                             hook.editOriginalComponents(List.of())
@@ -325,8 +325,8 @@ public class Events extends ListenerAdapter {
 
                             Database.MATCH_DATA_MAP.remove(messageID);
                         });
-                        case DRAW -> event.deferEdit().queue(hook -> {
-                            hook.editOriginalComponents(board)
+                        case DRAW -> event.editMessage("game ended").queue(hook -> {
+                            hook.editOriginalComponents(List.of())
                                     .setEmbeds(embed)
                                     .retainFilesById(List.of())
                                     .addFile(boardImage)
@@ -359,7 +359,7 @@ public class Events extends ListenerAdapter {
                                                 .addFile(boardImage).queue());
                         case INVALID -> event.deferEdit().queue();
                     }
-                } catch (IOException ignore) {} }
+                } catch (IOException e) { LOGGER.error(e.getMessage(), e); } }
             case "resign" -> {
                 Game game = matchData.getGame();
                 if (!game.contains(user.getIdLong())) {
@@ -369,7 +369,7 @@ public class Events extends ListenerAdapter {
                 game.resign(user);
                 MessageEmbed embed = game.getEmbed();
                 game.disableButtons();
-                event.editMessage("game ended").setEmbeds(embed).setActionRows(game.getRows()).queue();
+                event.deferEdit().queue(hook -> hook.editOriginal("game ended").setActionRows(List.of()).setEmbeds(embed).queue());
                 Database.MATCH_DATA_MAP.remove(messageID);
             }
         }
