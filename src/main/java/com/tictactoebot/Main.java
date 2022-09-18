@@ -1,5 +1,6 @@
 package com.tictactoebot;
 
+import com.tictactoebot.events.*;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.OnlineStatus;
@@ -13,10 +14,27 @@ import java.util.Scanner;
 
 public class Main {
     public static void main(String[] args) throws LoginException {
-        String token = args.length != 0? args[0] : System.getenv("BOT_TOKEN");
-        if (token == null) {
-            throw new IllegalArgumentException("Either the bot token not been provided in command line argument or environment variable BOT_TOKEN is not set!");
+        String bot_token_env = System.getenv("BOT_TOKEN");
+        String token;
+        int index = 0;
+        int expectedLength = 5;
+        if (bot_token_env != null) {
+            token = bot_token_env;
+            expectedLength = 4;
+        } else token = args[index++];
+
+        if (args.length != expectedLength) {
+            System.out.println("Usage: java -jar TicTacToeBot.jar <bot_token> <database_user_name> <database_password> <database_host> <database_name>");
+            return;
         }
+
+        String dbUser = args[index++];
+        String dbPassword = args[index++];
+        String dbHost = args[index++];
+        String dbName = args[index];
+
+        Database db = new Database(dbUser, dbPassword, dbHost, dbName);
+
         JDA bot = JDABuilder.createDefault(
                 token,
                     GatewayIntent.GUILD_MESSAGES,
@@ -29,7 +47,15 @@ public class Main {
         .setMemberCachePolicy(MemberCachePolicy.ALL)
         .enableCache(CacheFlag.CLIENT_STATUS)
         .disableCache(CacheFlag.VOICE_STATE, CacheFlag.EMOTE)
-        .addEventListeners(Events.INSTANCE)
+        .addEventListeners(
+                new BotReadyEvent(),
+                new BotShutdownEvent(db),
+                new GuildJoinEvent(db),
+                new GuildMemberJoinEvent(db),
+                new OnGuildReadyEvent(db),
+                new SlashCommandEvent(db),
+                new ButtonClickEvent(db)
+        )
         .setStatus(OnlineStatus.ONLINE)
         .setActivity(Activity.playing("TicTacToe"))
         .build();
